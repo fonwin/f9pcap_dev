@@ -1,0 +1,6 @@
+[submodule "alex_eth_git"]
+	path = alex_eth_git
+	url = https://github.com/alexforencich/verilog-ethernet
+[submodule "f9hwlib"]
+	path = f9hwlib
+	url = git@github.com:fonwin/f9hwlib.git

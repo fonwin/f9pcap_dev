@@ -1,0 +1,7 @@
+*debug*/
+debug*
+bak/
+*.bak.*
+
+# Verilog project
+f9pcap_*/
