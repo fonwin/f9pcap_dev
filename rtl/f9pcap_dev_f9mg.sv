@@ -20,17 +20,25 @@ module f9pcap_dev_f9mg #(
   parameter  LOCAL_CMD_SGAP_WIDTH  = 32,
   localparam LOCAL_CMD_SGAP_LENGTH = (LOCAL_CMD_SGAP_WIDTH + BYTE_WIDTH - 1) / BYTE_WIDTH,
   localparam CMD_SGAP_WIDTH        = (LOCAL_CMD_SGAP_WIDTH <= 0 ? 1 : LOCAL_CMD_SGAP_WIDTH),
+  
+  parameter  LOCAL_CMD_RECOVER_REQ_DEPTH = 16,
+  `include "localparam_recover.vh"
 
   parameter  VIO_DEBUG = 0
 )(
-  input  wire                     rst_in,
-  input  wire                     clk_in,
-  input  wire                     vio_clk_in,
+  input  wire                        rst_in,
+  input  wire                        clk_in,
+  input  wire                        vio_clk_in,
 
-  output reg                      is_f9pcap_en_out,
-  output wire[F9DEV_SN_WIDTH-1:0] f9dev_sn_out,
-  output wire[CMD_SGAP_WIDTH-1:0] local_sgap_out,
-  output wire                     f9mg_rx_join_out,
+  output reg                         is_f9pcap_en_out,
+  output wire[F9DEV_SN_WIDTH-1:0]    f9dev_sn_out,
+  output wire[CMD_SGAP_WIDTH-1:0]    local_sgap_out,
+  output wire                        f9mg_rx_join_out,
+
+  input  wire                        f9mg_recover_req_clk_in,
+  input  wire                        f9mg_recover_req_pop_in,
+  output wire                        f9mg_recover_req_valid_out,
+  output wire[RECOVER_REQ_WIDTH-1:0] f9mg_recover_req_data_out,
 
   input  wire                     axis_valid_in,
   input  wire                     axis_ready_in,
@@ -144,6 +152,9 @@ f9mg_rx_i(
   .udp_dst_port_out         (udp_dst_port         ),
   .udp_len_out              (udp_len              ),
   .udp_chk_sum_out          (udp_chk_sum          ),
+
+  .f9mg_local_ip_in         (f9pcap_mcgroup_addr_out ),
+  .f9mg_local_port_in       (f9pcap_mcgroup_port_out ),
 
   .f9mg_buf_valid_out       (f9mg_buf_valid       ),
   .f9mg_buf_last_out        (f9mg_buf_last        ),
@@ -274,6 +285,42 @@ if (LOCAL_CMD_SGAP_WIDTH > 0) begin
     end
   end
 end
+// -------------------------------------------------------------------------------
+if (LOCAL_CMD_RECOVER_REQ_DEPTH <= 0) begin
+  assign f9mg_recover_req_valid_out = 0;
+  assign f9mg_recover_req_data_out  = 0;
+end else begin
+  localparam[F9MG_LOCAL_CMD_WIDTH-1:0] F9MG_LOCAL_CMD_recover_req = "rcvr";
+  wire[RECOVER_REQ_WIDTH-1:0] recover_req_data = local_cmd_arg_buf[F9MG_LOCAL_ARG_WIDTH-RECOVER_REQ_WIDTH +: RECOVER_REQ_WIDTH];
+  wire                        recover_req_push = (local_cmd_valid  &&  local_cmd_str == F9MG_LOCAL_CMD_recover_req  &&  local_cmd_arg_len == RECOVER_REQ_LENGTH);
+  wire                        recover_req_empty;
+  wire                        recover_req_rst;
+  // -----
+  sync_reset
+  sync_rst_rcvr_i(
+    .clk     (f9mg_recover_req_clk_in ),
+    .rst_in  (rst_in                  ),
+    .rst_out (recover_req_rst         )
+  );
+  // -----
+  async_fifo #(
+    .DATA_WIDTH (RECOVER_REQ_WIDTH                   ),
+    .ADDR_WIDTH ($clog2(LOCAL_CMD_RECOVER_REQ_DEPTH) )
+  )
+  async_fifo_rcvr_req_i(
+    .wclk   (clk_in                    ),
+    .wrst_n (~rst_in                   ),
+    .wdata  (recover_req_data          ),
+    .winc   (recover_req_push          ),
+    .wfull  (                          ),
+    .rclk   (f9mg_recover_req_clk_in   ),
+    .rrst_n (~recover_req_rst          ),
+    .rdata  (f9mg_recover_req_data_out ),
+    .rempty (recover_req_empty         ),
+    .rinc   (f9mg_recover_req_pop_in   )
+  );
+  assign f9mg_recover_req_valid_out = ~recover_req_empty;
+end
 //////////////////////////////////////////////////////////////////////////////////
 if (VIO_DEBUG) begin
   localparam VIO_WIDTH = 256;
@@ -344,11 +391,13 @@ if (VIO_DEBUG) begin
     end
   end
   // ----------------------------------------------------------------------
+  (* dont_touch="yes" *)
+  wire[VIO_WIDTH-1:0] f9mg_recover_req_vio = {f9mg_recover_req_valid_out, 16'heeee, f9mg_recover_req_data_out };
+  // ----------------------------------------------------------------------
   /*
   create_ip -name vio -vendor xilinx.com -library ip -module_name vio_mg
   set_property -dict [list \
     CONFIG.C_NUM_PROBE_OUT {0} \
-    CONFIG.C_NUM_PROBE_IN {7} \
     CONFIG.C_PROBE_IN0_WIDTH {256} \
     CONFIG.C_PROBE_IN1_WIDTH {256} \
     CONFIG.C_PROBE_IN2_WIDTH {256} \
@@ -356,6 +405,8 @@ if (VIO_DEBUG) begin
     CONFIG.C_PROBE_IN4_WIDTH {256} \
     CONFIG.C_PROBE_IN5_WIDTH {256} \
     CONFIG.C_PROBE_IN6_WIDTH {256} \
+    CONFIG.C_PROBE_IN7_WIDTH {256} \
+    CONFIG.C_NUM_PROBE_IN {8} \
   ] [get_ips vio_mg]
   */
   vio_mg  vio_mg_i(
@@ -366,6 +417,7 @@ if (VIO_DEBUG) begin
     .probe_in4 (f9mg_local_cmd_vio     ),
     .probe_in5 (f9mg_local_cmd_arg_vio ),
     .probe_in6 (f9mg_cnt               ),
+    .probe_in7 (f9mg_recover_req_vio   ),
     .clk       (vio_clk_in             )
   );
 end // if (VIO_DEBUG)

@@ -14,10 +14,13 @@
   set_property CFGBVS                          VCCO   [current_design]
 
 #######################################################################################
-########## CLOCK CONSTRAINTS FOR the BOARD ##########
   #----- for ddr3;
-  set_property PACKAGE_PIN AB11     [get_ports clk_200M_p]
-  set_property IOSTANDARD  LVDS     [get_ports clk_200M_p]
+  set_property DCI_CASCADE {32 34}    [get_iobanks 33]
+
+#######################################################################################
+########## CLOCK CONSTRAINTS FOR the BOARD ##########
+# set_property PACKAGE_PIN AB11     [get_ports clk_200M_p]
+# set_property IOSTANDARD  LVDS     [get_ports clk_200M_p]
 
   #----- for sys clk;
   set_property PACKAGE_PIN F17      [get_ports clk_50M]

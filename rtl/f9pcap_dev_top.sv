@@ -2,6 +2,8 @@
 //////////////////////////////////////////////////////////////////////////////////
 module f9pcap_dev_top #(
   `include "eth_ip_localparam.vh"
+  `include "localparam_recover.vh"
+
   parameter[7:0] SFP_COUNT      = 2,
   parameter[7:0] PHY_COUNT      = 2,
 
@@ -33,7 +35,13 @@ module f9pcap_dev_top #(
   // "ULTRASCALE", "7SERIES", "NONE"
   parameter  IDELAYCTRL_SIM_DEVICE = "ULTRASCALE",
   parameter  TXSEQUENCE_PAUSE      = 0,
-  parameter  COUNT_125US           = 125000/6.4
+  parameter  COUNT_125US           = 125000/6.4,
+
+  parameter  DRAM_APP_CMD_WIDTH    = 3,
+  parameter  DRAM_ADDR_WIDTH       = 0,
+  parameter  DRAM_BURST_SIZE_BITS  = 64,
+  parameter  DRAM_APP_DATA_LENGTH  = 64,
+  localparam DRAM_APP_DATA_WIDTH   = DRAM_APP_DATA_LENGTH * BYTE_WIDTH
 )(
   input                       sysclk_100m_in,
   input                       sys_reset_in,
@@ -56,7 +64,24 @@ module f9pcap_dev_top #(
   output                      PHY_rgmii_txc    [PHY_COUNT-1:0],
   output                      PHY_rgmii_tx_ctl [PHY_COUNT-1:0],
   output[3:0]                 PHY_rgmii_txd    [PHY_COUNT-1:0],
-  output reg[1:0]             PHY_link_st      [PHY_COUNT-1:0]
+  output reg[1:0]             PHY_link_st      [PHY_COUNT-1:0],
+
+  input                            dram_rst,
+  input                            dram_clk,
+  input                            dram_init_calib_complete,
+  output                           dram_test_err_out,
+  output[DRAM_APP_CMD_WIDTH-1  :0] dram_app_cmd,
+  output                           dram_app_en,
+  input                            dram_app_rdy,
+  output[DRAM_ADDR_WIDTH-1     :0] dram_addr,
+  output[DRAM_APP_DATA_WIDTH-1 :0] dram_app_wdf_data,
+  output                           dram_app_wdf_end,
+  output[DRAM_APP_DATA_LENGTH-1:0] dram_app_wdf_mask,
+  output                           dram_app_wdf_wren,
+  input                            dram_app_wdf_rdy,
+  input [DRAM_APP_DATA_WIDTH-1 :0] dram_app_rd_data,
+  input                            dram_app_rd_data_end,
+  input                            dram_app_rd_data_valid
 );
 // ===============================================================================
 localparam TEMAC_TX_APPEND_FCS   = 1;
@@ -64,15 +89,16 @@ localparam TEMAC_DATA_WIDTH      = BYTE_WIDTH;
 localparam TEMAC_KEEP_WIDTH      = (TEMAC_DATA_WIDTH + BYTE_WIDTH - 1) / BYTE_WIDTH;
 localparam SFP_DATA_WIDTH        = 64;
 localparam SFP_KEEP_WIDTH        = (SFP_DATA_WIDTH + BYTE_WIDTH - 1) / BYTE_WIDTH;
+localparam IS_USE_DRAM_BUFFER    = (DRAM_ADDR_WIDTH > 0 && DRAM_APP_DATA_WIDTH > 0);
 //////////////////////////////////////////////////////////////////////////////////
 assign sfp_tx_disable = {SFP_COUNT{1'b0}};
 // -------------------------------------------------------------------------------
 wire   xcvr_ctrl_clk  = sysclk_100m_in;
 wire   xcvr_ctrl_rst  = sys_reset_in;
 //////////////////////////////////////////////////////////////////////////////////
-localparam RUNNING_TTS_LENGTH = 8;
+localparam RUNNING_TTS_LENGTH = 8; // 固定 8 bytes, 用來檢查設備是否有重啟;
 localparam RUNNING_TTS_WIDTH  = RUNNING_TTS_LENGTH * BYTE_WIDTH;
-localparam F9PHDR_TTS_LENGTH  = 6;
+localparam F9PHDR_TTS_LENGTH  = 7;
 localparam F9PHDR_TTS_WIDTH   = F9PHDR_TTS_LENGTH * BYTE_WIDTH;
 localparam GRAY_WIDTH         = F9PHDR_TTS_WIDTH;
 `include "func_gray.vh"
@@ -123,52 +149,50 @@ wire                       temac_tx_ready  [PHY_COUNT-1:0];
 wire[TEMAC_DATA_WIDTH-1:0] temac_tx_data   [PHY_COUNT-1:0];
 wire                       temac_tx_last   [PHY_COUNT-1:0];
 // ===============================================================================
-localparam         DEV_ST_BUF_LENGTH   = 36;
-localparam         DEV_ST_BUF_WIDTH    = DEV_ST_BUF_LENGTH * BYTE_WIDTH;
-localparam longint DEV_ST_INTERVAL_CNT = 30 * 1_000_000_000 * 10 / 64;
-localparam longint DEV_ST_DELAY_CNT    =  1 * 1_000_000_000 * 10 / 64;
-localparam         DEV_ST_CNT_WIDTH    = $clog2(DEV_ST_INTERVAL_CNT);
-wire               dev_st_rst;
-wire               dev_st_clk = tts_clk;
-sync_reset  sync_dev_st_rst_i(
+wire  dev_st_rst;
+wire  dev_st_clk = tts_clk;
+sync_reset
+sync_dev_st_rst_i(
   .clk    (dev_st_clk   ),
   .rst_in (sys_reset_in ),
   .rst_out(dev_st_rst   )
 );
-
-wire[DEV_ST_BUF_WIDTH-1:0] dev_st_buffer  = {
-                                DEV_ST_BUF_LENGTH[IP_2BYTES_WIDTH-1:0],  // [ 2]
-// struct HwInfoVer0 {
-//    /// 設備名稱, 例: "f9pcap  ";
-//    fon9::CharAry<8>  DeviceName_;
-// 
-//    /// 硬體: 例(顯示): HwFactory_ + '.' + HwId_ = "si_0001" = 訂製1通道板卡;
-//    /// - 硬體製造商.
-//    fon9::CharAry<2>  HwFactory_;
-//    /// - 硬體代號, 使用16進位顯示.
-//    fon9::PackHex<4>  HwId_;
-// 
-//    /// 執行單元(通道)的數量.
-//    uint8_t           UnitCount_;
-// 
-//    /// 韌體版本, 使用16進位顯示: 0x12345678;
-//    /// - 1234: 板卡韌體版本;
-//    /// - 5678: 核心韌體版本;
-//    fon9::PackHex<4>  BoardFwVer_;
-//    fon9::PackHex<4>  CoreFwVer_;
-// };
-                                f9dev_sn,                                // [ 8]
-                                F9PHDR_TTS_LENGTH[BYTE_WIDTH-1:0],       // [ 1]
-                                tts_uint,                                // [ 8]
-                                "fonwin:hello-test"                      // [17]
-                              };                                         // =36=
-reg                        dev_st_valid   = 0;
+// ---------------------
+localparam DEV_ST_BUF_LENGTH = 16*3 + DEV_ST_RECOVER_INFO_L;
+localparam DEV_ST_BUF_WIDTH  = DEV_ST_BUF_LENGTH * BYTE_WIDTH;
+wire[DEV_ST_RECOVER_INFO_W-1:0]  dev_st_recover_info;
+wire[DEV_ST_BUF_WIDTH-1:0] dev_st_buffer = {
+    DEV_ST_BUF_LENGTH[IP_2BYTES_WIDTH-1:0],  // --+[2]
+    16'h0001,                                //   |[2] Ver;
+    f9dev_sn,                                //   |[8]
+    {(16-12){8'h00}},                        // --+ 此區共 16 bytes;
+                                             //
+    F9PHDR_TTS_LENGTH[BYTE_WIDTH-1:0],       // --+
+    (IS_USE_DRAM_BUFFER ? F9PCAP_SEQNO_LENGTH    [BYTE_WIDTH-1:0] : 8'h00),
+    (IS_USE_DRAM_BUFFER ? RECOVER_REQ_ADDR_FROM_L[BYTE_WIDTH-1:0] : 8'h00),
+    (IS_USE_DRAM_BUFFER ? RECOVER_REQ_CHECK_L    [BYTE_WIDTH-1:0] : 8'h00),
+    (IS_USE_DRAM_BUFFER ? RECOVER_REQ_COUNT_L    [BYTE_WIDTH-1:0] : 8'h00),
+    {(16-5){8'h00}},                         // --+ 此區共 16 bytes;
+                                             //
+    tts_uint,                                // --+ [RUNNING_TTS_LENGTH]
+    {(16-RUNNING_TTS_LENGTH){8'h00}},        // --+ 此區共 16 bytes
+                                             //
+    dev_st_recover_info                      // [DEV_ST_RECOVER_INFO_L]
+  };                                         //= 16*3 + DEV_ST_RECOVER_INFO_L;
+// ---------------------
+localparam longint DEV_ST_INTERVAL_CNT = 30 * 1_000_000_000 * 10 / 64; // 約 30 秒;
+localparam longint DEV_ST_DELAY_CNT    =  1 * 1_000_000_000 * 10 / 64; // 約  1 秒;
+localparam longint DEV_ST_FORCE_CNT    = 10 *         1_000 * 10 / 64; // 約 10 us;
+localparam         DEV_ST_CNT_WIDTH    = $clog2(DEV_ST_INTERVAL_CNT);
 reg [DEV_ST_CNT_WIDTH-1:0] dev_st_cnt;
-reg                        dev_st_resend_chkp[PHY_COUNT-1:0];
+// ---------------------
 // SystemVerilog packed & unpacked:
 // https://www.consulting.amiq.com/2017/06/23/how-to-unpack-data-using-the-systemverilog-streaming-operators-2/
-wire[PHY_COUNT-1:0]        dev_st_resend_chku = {>>{dev_st_resend_chkp}};
-reg                        dev_st_delay_resend;
+reg                  dev_st_resend_chkp[PHY_COUNT-1:0];
+wire[PHY_COUNT-1:0]  dev_st_resend_chku = {>>{dev_st_resend_chkp}};
+reg                  dev_st_delay_resend;
+wire                 dev_st_force_resend;
+reg                  dev_st_valid = 0;
 // ---------------------
 wire f9mg_rx_join;
 wire SYN_f9mg_rx_join;
@@ -188,7 +212,9 @@ always @(posedge dev_st_clk) begin
   dev_st_cnt          <= dev_st_cnt - 1;
   dev_st_valid        <= (dev_st_cnt == 0) | SYN_f9mg_rx_join;
   // -----
-  if (dev_st_delay_resend) begin
+  if (dev_st_force_resend) begin
+    dev_st_cnt <= DEV_ST_FORCE_CNT[DEV_ST_CNT_WIDTH-1:0];
+  end else if (dev_st_delay_resend) begin
     dev_st_cnt <= DEV_ST_DELAY_CNT[DEV_ST_CNT_WIDTH-1:0] - 2; // - 2 從 dev_st_valid 到實際送出的調整;
   end
   // -----
@@ -208,6 +234,11 @@ always @(posedge dev_st_clk) begin
   end
 end
 // ===============================================================================
+wire                        f9mg_recover_req_clk = dram_clk;
+wire                        f9mg_recover_req_pop;
+wire                        f9mg_recover_req_valid;
+wire[RECOVER_REQ_WIDTH-1:0] f9mg_recover_req_data;
+// ===============================================================================
 f9pcap_sfp_to_temac #(
   .PHY_COUNT               (PHY_COUNT               ),
   .TEMAC_DATA_WIDTH        (TEMAC_DATA_WIDTH        ),
@@ -218,7 +249,11 @@ f9pcap_sfp_to_temac #(
   .FRAME_MAX_LENGTH        (FRAME_MAX_LENGTH        ),
   .F9HDR_BUFFER_LENGTH     (F9HDR_BUFFER_LENGTH     ),
   .TEMAC_OUT_BUFFER_LENGTH (TEMAC_OUT_BUFFER_LENGTH ),
-  .DEV_ST_BUF_LENGTH       (DEV_ST_BUF_LENGTH       )
+  .DEV_ST_BUF_LENGTH       (DEV_ST_BUF_LENGTH       ),
+  .DRAM_ADDR_WIDTH         (DRAM_ADDR_WIDTH         ),
+  .DRAM_APP_DATA_LENGTH    (DRAM_APP_DATA_LENGTH    ),
+  .DRAM_BURST_SIZE_BITS    (DRAM_BURST_SIZE_BITS    ),
+  .IS_USE_DRAM_BUFFER      (IS_USE_DRAM_BUFFER      )
 )
 f9pcap_i(
   .sys_rst_in            (sys_reset_in                    ),
@@ -248,7 +283,30 @@ f9pcap_i(
   .dev_st_rst_in         (dev_st_rst          ),
   .dev_st_clk_in         (dev_st_clk          ),
   .dev_st_valid_in       (dev_st_valid        ),
-  .dev_st_buf_in         (dev_st_buffer       )
+  .dev_st_buf_in         (dev_st_buffer       ),
+  .dev_st_recover_info_out(dev_st_recover_info),
+  .dev_st_force_resend_out(dev_st_force_resend),
+
+  .dram_rst                 (dram_rst                 ),
+  .dram_clk                 (dram_clk                 ),
+  .dram_init_calib_complete (dram_init_calib_complete ),
+  .dram_test_err_out        (dram_test_err_out        ),
+  .dram_app_cmd             (dram_app_cmd             ),
+  .dram_app_en              (dram_app_en              ),
+  .dram_app_rdy             (dram_app_rdy             ),
+  .dram_addr                (dram_addr                ),
+  .dram_app_wdf_data        (dram_app_wdf_data        ),
+  .dram_app_wdf_end         (dram_app_wdf_end         ),
+  .dram_app_wdf_mask        (dram_app_wdf_mask        ),
+  .dram_app_wdf_wren        (dram_app_wdf_wren        ),
+  .dram_app_wdf_rdy         (dram_app_wdf_rdy         ),
+  .dram_app_rd_data         (dram_app_rd_data         ),
+  .dram_app_rd_data_end     (dram_app_rd_data_end     ),
+  .dram_app_rd_data_valid   (dram_app_rd_data_valid   ),
+
+  .f9mg_recover_req_pop_out  (f9mg_recover_req_pop    ),
+  .f9mg_recover_req_valid_in (f9mg_recover_req_valid  ),
+  .f9mg_recover_req_data_in  (f9mg_recover_req_data   )
 );
 //////////////////////////////////////////////////////////////////////////////////
 wire                       temac_rx_rst      [PHY_COUNT-1:0];
@@ -546,16 +604,24 @@ if (F9MG_PHY_ID >= 0 | F9MG_SFP_ID >= 0) begin
   f9pcap_dev_f9mg #(
     .DATA_WIDTH           (F9MG_DATA_WIDTH ),
     .CLK_IN_HZ            (F9MG_CLK_IN_HZ  ),
-    .LOCAL_CMD_SGAP_WIDTH (SGAP_WIDTH      )
+    .LOCAL_CMD_SGAP_WIDTH (SGAP_WIDTH      ),
+    .LOCAL_CMD_RECOVER_REQ_DEPTH (IS_USE_DRAM_BUFFER ? 16 : 0)
   )
   f9mg_i (
-    .rst_in                  (f9mg_axis_rst       ),
-    .clk_in                  (f9mg_axis_clk       ),
-    .vio_clk_in              (xcvr_ctrl_clk       ),
-    .is_f9pcap_en_out        (is_f9pcap_en        ),
-    .f9dev_sn_out            (f9dev_sn            ),
-    .local_sgap_out          (sgap_cfg            ),
-    .f9mg_rx_join_out        (f9mg_rx_join        ),
+    .rst_in                     (f9mg_axis_rst          ),
+    .clk_in                     (f9mg_axis_clk          ),
+    .vio_clk_in                 (xcvr_ctrl_clk          ),
+    .is_f9pcap_en_out           (is_f9pcap_en           ),
+
+    .f9mg_rx_join_out           (f9mg_rx_join           ),
+
+    .f9dev_sn_out               (f9dev_sn               ),
+    .local_sgap_out             (sgap_cfg               ),
+    .f9mg_recover_req_clk_in    (f9mg_recover_req_clk   ),
+    .f9mg_recover_req_pop_in    (f9mg_recover_req_pop   ),
+    .f9mg_recover_req_valid_out (f9mg_recover_req_valid ),
+    .f9mg_recover_req_data_out  (f9mg_recover_req_data  ),
+
     .axis_valid_in           (f9mg_axis_valid     ),
     .axis_ready_in           (f9mg_axis_ready     ),
     .axis_data_in            (f9mg_axis_data      ),

@@ -2,6 +2,7 @@
 debug*
 bak/
 *.bak.*
+*.bak
 
 # Verilog project
 f9pcap_*/

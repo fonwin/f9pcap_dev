@@ -15,14 +15,10 @@
 
 #######################################################################################
 # ----- [rgmii_rx <=> sfp_tx] CDC path for [handshake or sync]
-  set SFP_TO_TEMAC_INST f9pcap_dev_i/f9pcap_i/wrap[*].cdc[*].to_temac_i/axis_store_fwd_i
-  set_false_path -to   [get_pins "$SFP_TO_TEMAC_INST/sync_*/*q1*/D"]
-  set_false_path -to   [get_pins "$SFP_TO_TEMAC_INST/frame_len_fifo_i/sync_*/*q1*/D"]
-  set_false_path -from [get_pins "$SFP_TO_TEMAC_INST/frame_len_fifo_i/fifomem/mem*/*/CLK"]
-  set_false_path -to   [get_pins "f9pcap_dev_i/f9pcap_i/wrap[*].cdc[*].sync_*/sync_reg_*/PRE"]
-
+# -------------------------------------------------------------------------------------
   set DEV_ST_TO_TEMAC_INST f9pcap_dev_i/f9pcap_i/dev_st[*].to_temac_i/axis_store_fwd_i
   set_false_path -to   [get_pins "$DEV_ST_TO_TEMAC_INST/sync_*/*q1*/D"]
+  set_false_path -to   [get_pins "$DEV_ST_TO_TEMAC_INST/*sync_*/sync_reg*/PRE"]
   set_false_path -to   [get_pins "$DEV_ST_TO_TEMAC_INST/frame_len_fifo_i/sync_*/*q1*/D"]
   set_false_path -from [get_pins "$DEV_ST_TO_TEMAC_INST/frame_len_fifo_i/fifomem/mem*/*/CLK"]
 
@@ -35,10 +31,6 @@
   set_false_path -from [get_pins {f9pcap_dev_i/xcvr[*].tgbaser_axis_i/fwd_cdc_i/a_fifo_i/fifomem/mem*/*/CLK}]
 
 #######################################################################################
-# ----- sync tts(Tick Time Stamp) for f9phdr;
-  set_false_path -to   [get_pins {f9pcap_dev_i/f9pcap_i/wrap[*].f9pcap_wrap_i/f9phdr_wrap_i/*sync_*/*q1*/D}]
-
-#######################################################################################
 # ----- 從 eeprom 讀出的資料, 長期有效, 所有地方皆可直接使用, 不用考慮時序(Timing)問題;
   set_false_path -from [get_pins {f9pcap_dev_i/f9mg_i/f9mg_cmd_sn_i/f9mg_sn_out*/C}] 
   set_false_path -from [get_pins {f9pcap_dev_i/f9mg_i/CDC_*/C}] 
@@ -48,7 +40,7 @@
 
 #######################################################################################
 # ----- vio probe_in
-  set_false_path -to [get_pins -hierarchical {*probe_in*/D} -filter {NAME =~ "*/inst/PROBE_IN_INST/probe_in*/D"}]
+# set_false_path -to [get_pins -hierarchical {*probe_in*/D} -filter {NAME =~ "*/inst/PROBE_IN_INST/probe_in*/D"}]
 # set_false_path -to [get_pins -hierarchical {*vio_mon_buf_out*/D}]
 
 #######################################################################################

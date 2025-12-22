@@ -10,6 +10,8 @@ localparam TXSEQUENCE_PAUSE     = `TGBASER_XCVR_TXSEQUENCE_PAUSE;
 localparam TXSEQUENCE_WIDTH     = TXSEQUENCE_PAUSE==0 ? 1 : $clog2(TXSEQUENCE_PAUSE+1);
 localparam TXSEQUENCE_ODD_PAUSE = `TGBASER_XCVR_TXSEQUENCE_ODD_PAUSE;
 //-///////////////////////////////////////////////////////////////////////////
+`define SIM_BEAT_DATA_LENGTH   8  ///<<<<========== 可調整此處用來測試 one cycle: SFP 送幾個 bytes?
+`define SIM_CHKRX_DATA_LENGTH 64  ///<<<<========== 可調整此處用來測試 one cycle: UDP 送幾個 bytes? 必須是 SIM_BEAT_DATA_LENGTH 的整數倍;
 `define SIM_FRAME_MIN_LENGTH  32
 `include "./sim_tgemac_rx_include.v"
 //-///////////////////////////////////////////////////////////////////////////
@@ -33,7 +35,7 @@ wire sfp_txclk = sfp_rxclk;
 //  forever #1.551  sfp_txclk = ~sfp_txclk;
 //end
 //-///////////////////////////////////////////////////////////////////////////
-localparam TTS_WIDTH  = 64;
+localparam TTS_WIDTH  = 7 * BYTE_WIDTH;
 localparam GRAY_WIDTH = TTS_WIDTH;
 `include "./func_gray.vh"
 
@@ -48,9 +50,6 @@ always @(posedge sfp_coreclk) begin
   end
 end
 //-///////////////////////////////////////////////////////////////////////////
-localparam DATA_WIDTH = BEAT_DATA_WIDTH;
-localparam KEEP_WIDTH = BEAT_KEEP_WIDTH;
-// ------------------------------------------------
 reg[1:0] sim_rx_busy_cnt    = 0;
 reg      sim_rx_ready       = 0;
 reg      sim_rx_delay_valid = 0;
@@ -69,42 +68,41 @@ end
 // ------------------------------------------------
 assign sim_tgemac_chk_clk  = sfp_txclk;
 // ------------------------------------------------
-wire                 eth_udp_axis_valid;
-wire[DATA_WIDTH-1:0] eth_udp_axis_data;
-wire[KEEP_WIDTH-1:0] eth_udp_axis_keep;
-wire                 eth_udp_axis_last;
-
 f9pcap_wrap_eth #(
-  .FRAME_MAX_LENGTH (FRAME_MAX_LENGTH ),
-  .DATA_WIDTH       (DATA_WIDTH       ),
-  .TTS_WIDTH        (TTS_WIDTH        )
+  .F9HDR_BUFFER_LENGTH (FRAME_MAX_LENGTH * 8 ),
+  .TTS_WIDTH           (TTS_WIDTH            ),
+  .SAME_IO_CLK         (0                    ),
+  .I_DATA_WIDTH        (BEAT_DATA_WIDTH      ),
+  .O_DATA_WIDTH        (CHKRX_DATA_WIDTH     )
 )
 f9pcap_wrap_i(
-  .rst_in      (sys_reset           ),
-  .clk_in      (sfp_rxclk           ),
   .tts_gray_in (tts_gray            ),
+  .port_id_in  (1                   ),
 
+  .rst_in      (sys_reset           ),
+  .i_clk_in    (sfp_rxclk           ),
   .i_valid_in  (sim_tgemac_rx_valid & sim_rx_delay_valid),
   .i_data_in   (sim_tgemac_rx_data  ),
-  .i_keep_in   (sim_tgemac_rx_ready ? sim_tgemac_rx_keep : {KEEP_WIDTH{1'b0}} ),
+  .i_keep_in   (sim_tgemac_rx_ready ? sim_tgemac_rx_keep : {BEAT_KEEP_WIDTH{1'b0}} ),
   .i_last_in   (sim_tgemac_rx_last  ),
-  .i_frame_err (0                   ),
 
-  .o_valid_out (eth_udp_axis_valid  ),
-  .o_data_out  (eth_udp_axis_data   ),
-  .o_keep_out  (eth_udp_axis_keep   ),
-  .o_last_out  (eth_udp_axis_last   ),
+  .i_frame_err_in (0                ),
+  .outbuf_full_in (0                ),
 
-  .EthSrcMAC   (48'h010203040506    ),
-  .IpSrcAddr   (32'h0a0b0c0d        ),
-  .IpDstAddr   (32'hee123456        ),
-  .UdpSrcPort  (16'd2000            ),
-  .UdpDstPort  (16'h789a            )
+  .o_rst_out   (                     ),
+  .o_clk_in    (sim_tgemac_chk_clk   ),
+  .o_valid_out (sim_tgemac_chk_valid ),
+//.o_ready_in  (sim_tgemac_chk_ready ),
+  .o_data_out  (sim_tgemac_chk_data  ),
+  .o_keep_out  (sim_tgemac_chk_keep  ),
+  .o_last_out  (sim_tgemac_chk_last  ),
+
+  .EthSrcMAC   (48'h010203040506     ),
+  .IpSrcAddr   (32'h0a0b0c0d         ),
+  .IpDstAddr   (32'hee123456         ),
+  .UdpSrcPort  (16'd2000             ),
+  .UdpDstPort  (16'h789a             )
 );
-assign sim_tgemac_chk_valid = eth_udp_axis_valid;
-assign sim_tgemac_chk_data  = eth_udp_axis_data;
-assign sim_tgemac_chk_keep  = eth_udp_axis_keep;
-assign sim_tgemac_chk_last  = eth_udp_axis_last;
 //////////////////////////////////////////////////////////////////////////////////
 //////////////////////////////////////////////////////////////////////////////////
 reg [TXSEQUENCE_WIDTH-1:0] serdes_tx_sequence = 0;

@@ -24,7 +24,7 @@ always #3.1 common_sfp_rx_clk = ~common_sfp_rx_clk;
 reg         common_phy_tx_clk = 1;
 always #4   common_phy_tx_clk = ~common_phy_tx_clk;
 //================================================================================
-localparam TTS_WIDTH  = 64;
+localparam TTS_WIDTH  = 7 * BYTE_WIDTH;
 localparam GRAY_WIDTH = TTS_WIDTH;
 `include "func_gray.vh"
 
@@ -42,7 +42,7 @@ end
 localparam PHY_COUNT        = 2;
 localparam TEMAC_DATA_WIDTH = BYTE_WIDTH;
 localparam SFP_COUNT        = 2;
-localparam SFP_DATA_LENGTH  = 4;
+localparam SFP_DATA_LENGTH  = 8;
 localparam SFP_DATA_WIDTH   = SFP_DATA_LENGTH * BYTE_WIDTH;
 localparam SFP_KEEP_WIDTH   = (SFP_DATA_WIDTH + BYTE_WIDTH - 1) / BYTE_WIDTH;
 localparam SGAP_WIDTH       = 16;
