@@ -1,45 +1,46 @@
 # ############################################################################
 #
-# build_f9pcap_si_xc7k325t_7s32_dram.tcl
+# build_f9pcap_si_xc7k480t_7s32x4_dram_4sfp.tcl
 #
 # 使用 dram buffer
+# 使用 sfp * 4 版本
 #
 # ############################################################################
 #
 # 建立 [SFP+ 抓包] 設備 vivado project
 #
-# 卡片來源: [赛特凌威科技](https://item.taobao.com/item.htm?_u=535po35ob365&id=573888696513&spm=a1z09.2.0.0.cc9f2e8dJn0AYz)
-#  * SFP * 2;  RJ45 * 2;
+# 卡片來源: [赛特凌威科技](https://world.taobao.com/item/6214809309.htm)
+#  * SFP * 4 or 10;  RJ45 * 1;
 #  * TriMode eth(100M,1G)網路:
 #    * 使用 RTL8211E-VB-CG 晶片.
 #    * https://datasheet.lcsc.com/lcsc/1810010421_Realtek-Semicon-RTL8211E-VB-CG_C90735.pdf
 #
 # ############################################################################
-set  ::proj_name   f9pcap_si_xc7k325t_7s32_dram
-set  ::hw_part     xc7k325tffg676-2
+set  ::proj_name   f9pcap_si_xc7k480t_7s32_dram_4sfp
+set  ::hw_part     xc7k480tffg901-2
 
 set     srcpath    [file dirname [info script]]
 source $srcpath/build_f9pcap_base.tcl
 
 # ============================================================================
 add_files ../f9hwlib/temac/rgmii_phy_if_si_0002.sv
-add_files ../rtl/f9pcap_si_xc7k325t_dram.sv
-set_property top f9pcap_si_xc7k325t_dram [current_fileset]
+add_files ../rtl/f9pcap_si_xc7k480t_dram_4sfp.sv
+set_property top f9pcap_si_xc7k480t_dram_4sfp [current_fileset]
 
-add_files -fileset constrs_1  ../rtl/f9pcap_dev_impl_7s32.xdc
-add_files -fileset constrs_1  ../rtl/f9pcap_dev_impl_dram.xdc
+add_files -fileset constrs_1   ../rtl/f9pcap_dev_impl_7s32.xdc
+add_files -fileset constrs_1   ../rtl/f9pcap_dev_impl_dram.xdc
 set_property used_in_synthesis false [get_files *impl*.xdc]
 
-add_files -fileset constrs_1                    ../rtl/f9pcap_si_xc7k325t.xdc
-set_property used_in_synthesis false [get_files ../rtl/f9pcap_si_xc7k325t.xdc]
-
+add_files -fileset constrs_1              ../rtl/f9pcap_si_xc7k480t_4sfp.xdc
+add_files -fileset constrs_1              ../rtl/f9pcap_si_xc7k480t_impl.xdc
+set_property used_in_synthesis false [get_files *f9pcap_si_xc7k480t_*.xdc]
 # ############################################################################
 source ../f9hwlib/temac/sys_ctrl_i50m_single.tcl
 source ../f9hwlib/tgemac/tgbaser_xcvr_7s32.tcl
 
 # ############################################################################
-set  ::ddr3_prj   stlv_xc7k325t_ddr3_mig_2g.prj
-source ../f9hwlib/dram/stlv_xc7k325t_ddr3.tcl
+set  ::ddr3_prj   stlv_xc7k480t_ddr3_mig_2g_a.prj
+source ../f9hwlib/dram/stlv_xc7k480t_ddr3.tcl
 
 # ############################################################################
 create_ip -name ila -vendor xilinx.com -library ip -version 6.2 -module_name ila_dram

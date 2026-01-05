@@ -1,16 +1,10 @@
 # ############################################################################
 #
-# build_f9pcap_si_xc7k325t_7s32_base.tcl
+# build_f9pcap_base.tcl
 #
 # ############################################################################
 #
 # 建立 [SFP+ 抓包] 設備 vivado project
-#
-# 卡片來源: [赛特凌威科技](https://item.taobao.com/item.htm?_u=535po35ob365&id=573888696513&spm=a1z09.2.0.0.cc9f2e8dJn0AYz)
-#  * SFP * 2;  RJ45 * 2;
-#  * TriMode eth(100M,1G)網路:
-#    * 使用 RTL8211E-VB-CG 晶片.
-#    * https://datasheet.lcsc.com/lcsc/1810010421_Realtek-Semicon-RTL8211E-VB-CG_C90735.pdf
 #
 # ############################################################################
 set srcpath [file dirname [info script]]
@@ -52,7 +46,6 @@ add_files ../f9hwlib/temac/gmii_temac_rx.v
 add_files ../f9hwlib/temac/gmii_temac_tx.v
 add_files ../f9hwlib/temac/rgmii_temac.v
 add_files ../f9hwlib/temac/temac_rx_to_axis.v
-add_files ../f9hwlib/temac/rgmii_phy_if_si_0002.sv
 
 add_files ../f9hwlib/tgemac/axis_baser_rx_64.v
 add_files ../f9hwlib/tgemac/axis_baser_tx_64_alex_20240213_baac.v
@@ -107,23 +100,14 @@ add_files ../f9hwlib/eth_tools/f9mg_cmd_sn.v
 add_files ../f9hwlib/iic_ctrl.v
 
 # ############################################################################
-add_files -fileset constrs_1                    ../rtl/f9pcap_dev.xdc
-add_files -fileset constrs_1                    ../rtl/f9pcap_dev_impl.xdc
-add_files -fileset constrs_1                    ../rtl/f9pcap_dev_impl_7s32.xdc
-set_property used_in_synthesis false [get_files *impl*.xdc]
-add_files -fileset constrs_1                    ../rtl/f9pcap_stlv_xc7k325t.xdc
-set_property used_in_synthesis false [get_files ../rtl/f9pcap_stlv_xc7k325t.xdc]
+add_files -fileset constrs_1 ../rtl/f9pcap_dev.xdc
+add_files -fileset constrs_1 ../rtl/f9pcap_dev_impl.xdc
 
 # ############################################################################
 set_property used_in_simulation       false   [get_files *_top*.*v]
 set_property used_in_synthesis        false   [get_files *_tb.*v ]
 set_property used_in_implementation   false   [get_files *_tb.*v ]
-set_property top f9pcap_stlv_xc7k325t         [current_fileset   ]
 set_property top f9pcap_sfp_to_temac_tb       [get_filesets sim_1]
-
-# ############################################################################
-source ../f9hwlib/temac/sys_ctrl_i50m_single.tcl
-source ../f9hwlib/tgemac/tgbaser_xcvr_7s32.tcl
 
 # ############################################################################
 create_ip -name vio -vendor xilinx.com -library ip -module_name vio_mg

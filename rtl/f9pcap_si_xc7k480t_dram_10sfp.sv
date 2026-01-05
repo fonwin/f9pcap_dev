@@ -1,14 +1,18 @@
 `timescale 1ns / 1ps
 //////////////////////////////////////////////////////////////////////////////////
-module f9pcap_stlv_xc7k325t_dram #(
-  parameter[7:0]    PHY_COUNT = 2,
-  parameter[7:0]    SFP_COUNT = 2,
-  parameter integer GTREFCLK_COUNT = 1,
-  parameter integer QUAD_COUNT     = 1,
-  parameter integer QUAD_REFCLK_MAP[QUAD_COUNT-1 :0] = {    0 },
-  parameter integer SFP_QUAD_MAP   [SFP_COUNT -1 :0] = { 0, 0 },
-  parameter integer SFP_QPLL_MASTER[SFP_COUNT -1 :0] = { 0, 1 },
+module f9pcap_si_xc7k480t_dram_10sfp #(
+  parameter[7:0]    PHY_COUNT  = 1,
+
+  parameter[7:0]    QSFP_COUNT = 2,
+  parameter[7:0]    SFP_COUNT  = 2 + QSFP_COUNT * 4,
+  parameter integer SFP_QUAD_MAP   [SFP_COUNT -1 :0] = { 2, 2, 2, 2,   1, 1, 1, 1,   0, 0 },
+  parameter integer SFP_QPLL_MASTER[SFP_COUNT -1 :0] = { 0, 0, 0, 1,   0, 0, 0, 1,   0, 1 },
   
+  parameter integer GTREFCLK_COUNT = 1,
+  parameter integer QUAD_COUNT     = 3,
+  parameter integer QUAD_REFCLK_MAP[QUAD_COUNT-1 :0] = {    0, 0, 0 },
+
+  localparam LED_COUNT       = 8,
   localparam USE_DRAM_BUFFER = 1
 )(
   /// 這裡的 ddr3_* 在 xdc 裡面不必逐個設定(已在 .prj 設定),
@@ -38,15 +42,22 @@ module f9pcap_stlv_xc7k325t_dram #(
   output                eeprom_scl,
   inout                 eeprom_sda,
 
-  input                 sfp_gt_refclk_p,
-  input                 sfp_gt_refclk_n,
-  input [SFP_COUNT-1:0] sfp_rx_p,
-  input [SFP_COUNT-1:0] sfp_rx_n,
-  output[SFP_COUNT-1:0] sfp_tx_p,
-  output[SFP_COUNT-1:0] sfp_tx_n,
-  output[7:0]           led,
+  output[LED_COUNT-1:0] leds_out,
 //input                 key2,
 //input                 key3,
+
+  input [GTREFCLK_COUNT-1:0]  sfp_gt_refclk_p,
+  input [GTREFCLK_COUNT-1:0]  sfp_gt_refclk_n,
+  input [SFP_COUNT-1:0]       sfp_rx_p,
+  input [SFP_COUNT-1:0]       sfp_rx_n,
+  output[SFP_COUNT-1:0]       sfp_tx_p,
+  output[SFP_COUNT-1:0]       sfp_tx_n,
+
+  output                      qsfp_ResetN_out  [QSFP_COUNT-1:0],
+  output                      qsfp_InitMode_out[QSFP_COUNT-1:0],
+  output                      qsfp_ModSelN_out [QSFP_COUNT-1:0],
+  input                       qsfp_ModPrsN_in  [QSFP_COUNT-1:0],
+  input                       qsfp_IntN_in     [QSFP_COUNT-1:0],
 
   output                PHY_rgmii_reset  [PHY_COUNT-1:0],
 //output                PHY_rgmii_mdc    [PHY_COUNT-1:0],
@@ -76,11 +87,6 @@ module f9pcap_stlv_xc7k325t_dram #(
   );
 //////////////////////////////////////////////////////////////////////////////
   wire[SFP_COUNT-1:0] tunnel_led;
-  // ----------------------------------------------
-  genvar sfpL;
-  for (sfpL = 0;  sfpL < SFP_COUNT;  sfpL = sfpL + 1) begin
-    assign led[sfpL*2] = ~tunnel_led[sfpL];
-  end
 //////////////////////////////////////////////////////////////////////////////
   localparam BYTE_WIDTH           = 8;
   localparam DRAM_BYTE_WIDTH      = BYTE_WIDTH;
@@ -241,8 +247,9 @@ end
     .dram_app_rd_data_valid   (dram_app_rd_data_valid    )
   );
 //////////////////////////////////////////////////////////////////////////////
-  reg[25:0] flash_counter = 0;
-  wire      flash_sig     = flash_counter[25]; // = 33554432*10 / (10^9) = 0.335544320 秒;
+  reg[26:0] flash_counter = 0;
+  wire      flash_fast    = flash_counter[25]; // = 33554432*10 / (10^9) = 0.335544320 秒;
+  wire      flash_slow    = flash_counter[26];
   always @(posedge sysclk_100m)  begin
     flash_counter <= flash_counter + 1;
     if (sys_reset) begin
@@ -271,17 +278,50 @@ end
    .sys_reset  (sys_reset     ),
    .led_out    (breath_led_w  )
   );
-  // --------------------------
-  // PHY: 呼吸:100M; 恆亮:1G; 閃爍:10M; 不亮:無連線;
-  wire rj45_100m_led = breath_led_w;
-  // --------------------------
-  genvar phyL;
-  for (phyL = 0;  phyL < PHY_COUNT;  phyL = phyL + 1) begin
+// ===========================================================================
+  wire[PHY_COUNT-1:0] phy_leds;
+  for (genvar phyL = 0;  phyL < PHY_COUNT;  phyL = phyL + 1) begin
     assign PHY_rgmii_reset[phyL] = ~sys_reset;
-    assign led[phyL*2 + 1] = ( PHY_link_st[phyL] == 2'b01 ? rj45_100m_led // 100M
-                             : PHY_link_st[phyL] == 2'b10 ? 1'b0          // 1G
-                             : PHY_link_st[phyL] == 2'b11 ? flash_sig     // 10M
-                             :                              1'b1 );
+    // PHY: 呼吸:100M; 恆亮:1G; 閃爍:10M; 不亮:無連線;
+    assign phy_leds[phyL] = ( PHY_link_st[phyL] == 2'b01 ? breath_led_w // 100M
+                            : PHY_link_st[phyL] == 2'b10 ? 1'b0         // 1G
+                            : PHY_link_st[phyL] == 2'b11 ? flash_fast   // 10M
+                            :                              1'b1 );
+  end
+// ===========================================================================
+  wire[SFP_COUNT/2-1:0] sfp_cmb_leds;
+  for (genvar sfpL = 0;  sfpL < SFP_COUNT;  sfpL = sfpL + 2) begin
+    reg    cmb_led;
+    assign sfp_cmb_leds[sfpL/2] = cmb_led;
+    always @(*) begin
+      case({tunnel_led[sfpL],tunnel_led[sfpL+1]})
+      2'b00: cmb_led = 1'b1; // dark;
+      2'b11: cmb_led = 1'b0; // light;
+      2'b10: cmb_led = flash_fast;
+      2'b01: cmb_led = flash_slow;
+      endcase
+    end
+  end
+// ===========================================================================
+  localparam LED_IDX_FROM = 4;          // 檔板上的 leds 依序為:
+  assign leds_out[2] = phy_leds[0];     // red
+  assign leds_out[3] = sfp_cmb_leds[0]; // green
+  assign leds_out[1] = sfp_cmb_leds[1]; // green
+  assign leds_out[0] = breath_led_w;
+  for (genvar ledL = 0;  ledL < LED_COUNT-LED_IDX_FROM;  ledL = ledL + 1) begin
+    wire   led_w;
+    assign leds_out[ledL+LED_IDX_FROM] = led_w;
+    if (SFP_COUNT <= LED_COUNT-LED_IDX_FROM) begin
+      if (ledL < SFP_COUNT) begin
+        assign led_w = ~tunnel_led[ledL];
+      end else begin
+        assign led_w = 1'b1; // dark;
+      end
+    end else if (ledL+2 < SFP_COUNT/2) begin
+      assign led_w = sfp_cmb_leds[ledL+2];
+    end else begin
+      assign led_w = 1'b1; // dark;
+    end
   end
 // ===========================================================================
 endmodule

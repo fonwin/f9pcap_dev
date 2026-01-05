@@ -35,7 +35,6 @@ set_multicycle_path 1 -hold  -from    [get_pins "$SEND_ETH_UDP_I/*/C"]          
 
 #######################################################################################
 # ----- f9mg recover request
-set_false_path -to   [get_pins "f9pcap_dev_i/f9mg_i/sync_*/sync_reg*/PRE"]
 set_false_path -to   [get_pins "f9pcap_dev_i/f9mg_i/async_fifo_*/sync_*/*q1*/D"]
 set_false_path -from [get_pins "f9pcap_dev_i/f9mg_i/async_fifo_*/fifomem/mem*/*/CLK"]
 

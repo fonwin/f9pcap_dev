@@ -6,7 +6,8 @@
 # ############################################################################
 set proj_directory [get_property DIRECTORY [current_project]]; cd $proj_directory; pwd
 # ----------------------------------------------------------------------------
-set hwdev          [lindex [get_hw_devices xc7k325t_*] 0]
+set devname        [get_property DEVICE [get_parts [get_property PART [current_project]]]]
+set hwdev          [lindex [get_hw_devices ${devname}_*] 0]
 set proj_name      [get_property NAME      [current_project]]
 set top_name       [get_property TOP       [current_fileset]]
 

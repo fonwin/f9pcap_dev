@@ -590,7 +590,6 @@ for (genvar sfpL = 0;  sfpL < SFP_COUNT;  sfpL = sfpL + 1) begin : xcvr
 end
 //////////////////////////////////////////////////////////////////////////////////
 if (F9MG_PHY_ID >= 0 | F9MG_SFP_ID >= 0) begin
-  localparam F9MG_CLK_IN_HZ   = (F9MG_PHY_ID < 0 ? 161_300_000    : 125_000_000);
   localparam F9MG_DATA_WIDTH  = (F9MG_PHY_ID < 0 ? SFP_DATA_WIDTH : TEMAC_DATA_WIDTH);
   localparam F9MG_KEEP_WIDTH  = (F9MG_DATA_WIDTH + BYTE_WIDTH - 1) / BYTE_WIDTH;
   wire                       f9mg_axis_rst   = F9MG_PHY_ID < 0 ? sfp_rx_axis_rst_f9mg    : temac_rx_rst_f9mg;
@@ -602,17 +601,18 @@ if (F9MG_PHY_ID >= 0 | F9MG_SFP_ID >= 0) begin
   wire                       f9mg_axis_ready = 1;
 
   f9pcap_dev_f9mg #(
-    .DATA_WIDTH           (F9MG_DATA_WIDTH ),
-    .CLK_IN_HZ            (F9MG_CLK_IN_HZ  ),
-    .LOCAL_CMD_SGAP_WIDTH (SGAP_WIDTH      ),
+    .DATA_WIDTH                  (F9MG_DATA_WIDTH            ),
+    .SYS_CLK_IN_HZ               (100_000_000                ),
+    .LOCAL_CMD_SGAP_WIDTH        (SGAP_WIDTH                 ),
     .LOCAL_CMD_RECOVER_REQ_DEPTH (IS_USE_DRAM_BUFFER ? 16 : 0)
   )
   f9mg_i (
-    .rst_in                     (f9mg_axis_rst          ),
-    .clk_in                     (f9mg_axis_clk          ),
-    .vio_clk_in                 (xcvr_ctrl_clk          ),
-    .is_f9pcap_en_out           (is_f9pcap_en           ),
+    .sys_clk_in                 (sysclk_100m_in         ),
+    .sys_rst_in                 (sys_reset_in           ),
+    .eeprom_scl_out             (eeprom_scl_out         ),
+    .eeprom_sda_io              (eeprom_sda_io          ),
 
+    .is_f9pcap_en_out           (is_f9pcap_en           ),
     .f9mg_rx_join_out           (f9mg_rx_join           ),
 
     .f9dev_sn_out               (f9dev_sn               ),
@@ -622,18 +622,19 @@ if (F9MG_PHY_ID >= 0 | F9MG_SFP_ID >= 0) begin
     .f9mg_recover_req_valid_out (f9mg_recover_req_valid ),
     .f9mg_recover_req_data_out  (f9mg_recover_req_data  ),
 
-    .axis_valid_in           (f9mg_axis_valid     ),
-    .axis_ready_in           (f9mg_axis_ready     ),
-    .axis_data_in            (f9mg_axis_data      ),
-    .axis_keep_in            (f9mg_axis_keep      ),
-    .axis_last_in            (f9mg_axis_last      ),
-    .eeprom_scl_out          (eeprom_scl_out      ),
-    .eeprom_sda_io           (eeprom_sda_io       ),
-    .f9pcap_mcgroup_addr_out (f9pcap_mcgroup_addr ),
-    .f9pcap_mcgroup_port_out (f9pcap_mcgroup_port ),
-    .f9pcap_src_mac_addr_out (f9pcap_src_mac_addr ),
-    .f9pcap_src_ip_addr_out  (f9pcap_src_ip_addr  ),
-    .f9pcap_src_port_out     (f9pcap_src_port     )
+    .axis_rst_in                (f9mg_axis_rst          ),
+    .axis_clk_in                (f9mg_axis_clk          ),
+    .axis_valid_in              (f9mg_axis_valid        ),
+    .axis_ready_in              (f9mg_axis_ready        ),
+    .axis_data_in               (f9mg_axis_data         ),
+    .axis_keep_in               (f9mg_axis_keep         ),
+    .axis_last_in               (f9mg_axis_last         ),
+
+    .f9pcap_mcgroup_addr_out    (f9pcap_mcgroup_addr    ),
+    .f9pcap_mcgroup_port_out    (f9pcap_mcgroup_port    ),
+    .f9pcap_src_mac_addr_out    (f9pcap_src_mac_addr    ),
+    .f9pcap_src_ip_addr_out     (f9pcap_src_ip_addr     ),
+    .f9pcap_src_port_out        (f9pcap_src_port        )
   );
 end
 // ===============================================================================

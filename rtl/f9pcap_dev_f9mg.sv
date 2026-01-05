@@ -4,7 +4,7 @@ module f9pcap_dev_f9mg #(
   `include "eth_ip_localparam.vh"
 
   /// 用來計算 eeprom_scl_out;
-  parameter  CLK_IN_HZ   = 161_300_000,
+  parameter  SYS_CLK_IN_HZ = 100_000_000,
 
   parameter  DATA_WIDTH  = 64,
   localparam DATA_LENGTH = (DATA_WIDTH + BYTE_WIDTH - 1) / BYTE_WIDTH,
@@ -26,9 +26,13 @@ module f9pcap_dev_f9mg #(
 
   parameter  VIO_DEBUG = 0
 )(
-  input  wire                        rst_in,
-  input  wire                        clk_in,
-  input  wire                        vio_clk_in,
+  input  wire                        axis_rst_in,
+  input  wire                        axis_clk_in,
+  input  wire                        axis_valid_in,
+  input  wire                        axis_ready_in,
+  input  wire [DATA_WIDTH-1:0]       axis_data_in,
+  input  wire [KEEP_WIDTH-1:0]       axis_keep_in,
+  input  wire                        axis_last_in,
 
   output reg                         is_f9pcap_en_out,
   output wire[F9DEV_SN_WIDTH-1:0]    f9dev_sn_out,
@@ -40,20 +44,16 @@ module f9pcap_dev_f9mg #(
   output wire                        f9mg_recover_req_valid_out,
   output wire[RECOVER_REQ_WIDTH-1:0] f9mg_recover_req_data_out,
 
-  input  wire                     axis_valid_in,
-  input  wire                     axis_ready_in,
-  input  wire [DATA_WIDTH-1:0]    axis_data_in,
-  input  wire [KEEP_WIDTH-1:0]    axis_keep_in,
-  input  wire                     axis_last_in,
+  input  wire                        sys_rst_in,
+  input  wire                        sys_clk_in,
+  output wire                        eeprom_scl_out,
+  inout  wire                        eeprom_sda_io,
 
-  output wire                     eeprom_scl_out,
-  inout  wire                     eeprom_sda_io,
-
-  output wire[IP_ADDR_WIDTH -1:0] f9pcap_mcgroup_addr_out,
-  output wire[IP_PORT_WIDTH -1:0] f9pcap_mcgroup_port_out,
-  output wire[MAC_ADDR_WIDTH-1:0] f9pcap_src_mac_addr_out,
-  output wire[IP_ADDR_WIDTH -1:0] f9pcap_src_ip_addr_out,
-  output wire[IP_PORT_WIDTH -1:0] f9pcap_src_port_out
+  output wire[IP_ADDR_WIDTH -1:0]    f9pcap_mcgroup_addr_out,
+  output wire[IP_PORT_WIDTH -1:0]    f9pcap_mcgroup_port_out,
+  output wire[MAC_ADDR_WIDTH-1:0]    f9pcap_src_mac_addr_out,
+  output wire[IP_ADDR_WIDTH -1:0]    f9pcap_src_ip_addr_out,
+  output wire[IP_PORT_WIDTH -1:0]    f9pcap_src_port_out
 );
 // ===============================================================================
 // f9mg command format
@@ -120,8 +120,8 @@ f9mg_eth_receiver #(
   .F9MG_DST_PORT       (F9MG_DST_PORT       )
 )
 f9mg_rx_i(
-  .rst_in                   (rst_in               ),
-  .clk_in                   (clk_in               ),
+  .rst_in                   (axis_rst_in          ),
+  .clk_in                   (axis_clk_in          ),
   .axis_valid_in            (axis_valid_in        ),
   .axis_ready_in            (axis_ready_in        ),
   .axis_data_in             (axis_data_in         ),
@@ -175,8 +175,8 @@ igmp_ipv4_parser #(
   .BYTE_REVERSE (1          )
 )
 igmp_rx_i(
-  .rst_in                (rst_in             ),
-  .clk_in                (clk_in             ),
+  .rst_in                (axis_rst_in        ),
+  .clk_in                (axis_clk_in        ),
   .ipv4_hdr_protocol_in  (ipv4_hdr_protocol  ),
   .ipv4_payload_valid_in (ipv4_payload_valid ),
   .ipv4_payload_ready_in (1'b1               ),
@@ -194,7 +194,7 @@ igmp_rx_i(
 
 reg    f9mg_rx_join_int;
 assign f9mg_rx_join_out = f9mg_rx_join_int;
-always @(posedge clk_in) begin
+always @(posedge axis_clk_in) begin
   f9mg_rx_join_int <= 0;
   if (igmp_valid & igmp_act == IGMP_ACT_JOIN) begin
     f9mg_rx_join_int <= (igmp_group_addr == f9pcap_mcgroup_addr_out);
@@ -218,12 +218,15 @@ assign { f9mg_sn_dev_name, f9dev_sn_out,
 } = f9mg_sn_buf;
 
 f9mg_cmd_sn #(
+  /// EEPROM 前端的空間, 偶爾會因經常寫入(使用回收的EEPROM?)造成失效,
+  /// 所以這裡改 IIC_DEVICE_ADDR, 用較高位址的空間來儲存 f9mg_sn;
+  .IIC_DEVICE_ADDR    (1                  ),
   .F9MG_SN_BUF_LENGTH (F9MG_SN_BUF_LENGTH ),
-  .CLK_IN_HZ          (CLK_IN_HZ          )
+  .CLK_IN_HZ          (SYS_CLK_IN_HZ      )
 )
 f9mg_cmd_sn_i(
-  .rst_in             (rst_in          ),
-  .clk_in             (clk_in          ),
+  .rst_in             (sys_rst_in      ),
+  .clk_in             (sys_clk_in      ),
   .eeprom_scl_out     (eeprom_scl_out  ),
   .eeprom_sda_io      (eeprom_sda_io   ),
   .f9mg_sn_valid_out  (f9mg_sn_valid   ),
@@ -231,13 +234,26 @@ f9mg_cmd_sn_i(
   .f9mg_resn_valid_in (f9mg_resn_valid ),
   .f9mg_resn_in       (f9mg_resn_buf   )
 );
-always @(posedge clk_in) begin
-  is_f9pcap_en_out <= (f9mg_sn_dev_name == F9DEV_NAME_STRING);
-  f9mg_resn_valid  <= 0;
+
+reg  resn_valid_axis_domain;
+wire resn_valid_sys_domain;
+sync_reset
+sync_rst_resn_i(
+  .clk     (sys_clk_in             ),
+  .rst_in  (resn_valid_axis_domain ),
+  .rst_out (resn_valid_sys_domain  )
+);
+always @(posedge sys_clk_in) begin
+  f9mg_resn_valid <= resn_valid_sys_domain;
+end
+// --------------------------------------------------------------
+always @(posedge axis_clk_in) begin
+  is_f9pcap_en_out       <= (f9mg_sn_dev_name == F9DEV_NAME_STRING);
+  resn_valid_axis_domain <= 0;
   if (f9mg_buf_rx_cmd_valid) begin
     if (f9mg_buf_rx_cmd_str == F9MG_CMD_resn) begin
       if (f9mg_buf_rx_len == F9MG_CMD_LENGTH + F9MG_SN_BUF_LENGTH) begin
-        f9mg_resn_valid <= 1;
+        resn_valid_axis_domain <= 1;
       end
     end
   end
@@ -262,7 +278,7 @@ reg [W_F9MG_BUF_LEN      -1:0]   local_cmd_arg_len;
 wire[F9MG_LOCAL_ARG_WIDTH-1:0]   local_cmd_arg_buf = f9mg_buf_rx_all[F9MG_LOCAL_ARG_WIDTH-1:0];
 assign {local_rx_sn_w, local_cmd_s_w} = f9mg_buf_rx_cmd_str;
 
-always @(posedge clk_in) begin
+always @(posedge axis_clk_in) begin
    local_cmd_valid   <= local_cmd_valid_w;
    local_cmd_str     <= local_cmd_s_w;
    local_cmd_arg_len <= f9mg_buf_rx_len - (F9MG_CMD_LENGTH + F9DEV_NAME_LENGTH);
@@ -275,12 +291,12 @@ if (LOCAL_CMD_SGAP_WIDTH > 0) begin
   reg[LOCAL_CMD_SGAP_WIDTH-1:0] CDC_local_sgap;
   assign       local_sgap_out = CDC_local_sgap;
 
-  always @(posedge clk_in) begin
+  always @(posedge axis_clk_in) begin
     if (local_cmd_valid  &&  local_cmd_str == F9MG_LOCAL_CMD_sgap  &&  local_cmd_arg_len == LOCAL_CMD_SGAP_LENGTH) begin
       CDC_local_sgap <= local_cmd_arg_buf[F9MG_LOCAL_ARG_WIDTH-W_LOCAL_CMD_SGAP_ALIGN +: LOCAL_CMD_SGAP_WIDTH];
     end
     // -----
-    if (rst_in) begin
+    if (axis_rst_in) begin
       CDC_local_sgap <= 0;
     end
   end
@@ -299,7 +315,7 @@ end else begin
   sync_reset
   sync_rst_rcvr_i(
     .clk     (f9mg_recover_req_clk_in ),
-    .rst_in  (rst_in                  ),
+    .rst_in  (axis_rst_in             ),
     .rst_out (recover_req_rst         )
   );
   // -----
@@ -308,8 +324,8 @@ end else begin
     .ADDR_WIDTH ($clog2(LOCAL_CMD_RECOVER_REQ_DEPTH) )
   )
   async_fifo_rcvr_req_i(
-    .wclk   (clk_in                    ),
-    .wrst_n (~rst_in                   ),
+    .wclk   (axis_clk_in               ),
+    .wrst_n (~axis_rst_in              ),
     .wdata  (recover_req_data          ),
     .winc   (recover_req_push          ),
     .wfull  (                          ),
@@ -332,7 +348,7 @@ if (VIO_DEBUG) begin
     localparam W_REMAIN  = F9MG_BUF_WIDTH - iL;
     localparam W_CURRENT = (W_REMAIN <= VIO_WIDTH ? W_REMAIN : VIO_WIDTH);
     if (W_CURRENT > 0) begin
-      always @(posedge clk_in) begin
+      always @(posedge axis_clk_in) begin
         if (f9mg_buf_rx_cmd_valid) begin
           f9mg_buf_vio[iL/VIO_WIDTH] <= f9mg_buf_rx_all[iL +: W_CURRENT];
         end
@@ -354,12 +370,12 @@ if (VIO_DEBUG) begin
   (* dont_touch="yes" *)
   reg [VIO_WIDTH-1:0]   f9mg_sn_buf_vio;
 
-  always @(posedge clk_in) begin
+  always @(posedge axis_clk_in) begin
     if (f9mg_buf_rx_cmd_valid) begin
       f9mg_buf_rx_len_vio <= f9mg_buf_rx_len;
     end
     // -----
-    if (f9mg_resn_valid) begin
+    if (resn_valid_axis_domain) begin
       f9mg_resn_valid_cnt <= f9mg_resn_valid_cnt + 1;
     end
     // -----
@@ -380,7 +396,7 @@ if (VIO_DEBUG) begin
                                              local_sgap_vio, local_sgap_123_vio};
   (* dont_touch="yes" *)
   reg [VIO_WIDTH-1:0] f9mg_local_cmd_arg_vio;
-  always @(posedge clk_in) begin
+  always @(posedge axis_clk_in) begin
     local_cmd_cnt_vio      <= local_cmd_cnt_vio + local_cmd_valid;
     f9mg_local_cmd_arg_vio <= local_cmd_arg_buf[F9MG_LOCAL_ARG_WIDTH-1 -: VIO_WIDTH];
     local_sgap_vio         <= local_sgap_out;
@@ -418,7 +434,7 @@ if (VIO_DEBUG) begin
     .probe_in5 (f9mg_local_cmd_arg_vio ),
     .probe_in6 (f9mg_cnt               ),
     .probe_in7 (f9mg_recover_req_vio   ),
-    .clk       (vio_clk_in             )
+    .clk       (sys_clk_in             )
   );
 end // if (VIO_DEBUG)
 // ===============================================================================

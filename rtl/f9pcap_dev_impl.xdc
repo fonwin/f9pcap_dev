@@ -7,7 +7,7 @@
 #######################################################################################
 ########## delay system reset ##########
   set_false_path -from [get_pins  sys_ctrl_inst/delay_rst_d*/C]
-  
+
 #######################################################################################
 # ----- phy link st to all;
   set_false_path -from [get_pins {f9pcap_dev_i/phy[*].rgmii_phy_rx_*/st_link_speed_*/C}]
@@ -32,15 +32,20 @@
 
 #######################################################################################
 # ----- 從 eeprom 讀出的資料, 長期有效, 所有地方皆可直接使用, 不用考慮時序(Timing)問題;
-  set_false_path -from [get_pins {f9pcap_dev_i/f9mg_i/f9mg_cmd_sn_i/f9mg_sn_out*/C}] 
-  set_false_path -from [get_pins {f9pcap_dev_i/f9mg_i/CDC_*/C}] 
+  set_false_path -from [get_pins {f9pcap_dev_i/f9mg_i/f9mg_cmd_sn_i/f9mg_sn_out*/C}]
+  set_false_path -from [get_pins {f9pcap_dev_i/f9mg_i/CDC_*/C}]
+# ----- 要寫入 eeprom 的資料, 必定長期有效, 不用考慮時序(Timing)問題;
+  set_false_path -to   [get_pins {f9pcap_dev_i/f9mg_i/f9mg_cmd_sn_i/eeprom_wr_data*/D}]
+
+#######################################################################################
+  set_false_path -to   [get_pins "f9pcap_dev_i/f9mg_i/sync_*/sync_reg*/PRE"]
 
 #######################################################################################
   set_false_path -to [get_pins {f9pcap_dev_i/sync_f9mg_rx_join_i/sync_reg*/PRE}]
 
 #######################################################################################
 # ----- vio probe_in
-# set_false_path -to [get_pins -hierarchical {*probe_in*/D} -filter {NAME =~ "*/inst/PROBE_IN_INST/probe_in*/D"}]
+  set_false_path -to [get_pins -hierarchical {*probe_in*/D} -filter {NAME =~ "*/inst/PROBE_IN_INST/probe_in*/D"}]
 # set_false_path -to [get_pins -hierarchical {*vio_mon_buf_out*/D}]
 
 #######################################################################################
